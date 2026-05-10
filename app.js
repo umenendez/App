@@ -1,408 +1,435 @@
 // ─────────────────────────────────────────────────────────
-// SUPABASE CLIENT
+// AniTrack — app.js
+// Supabase + Jikan API (portadas automáticas)
 // ─────────────────────────────────────────────────────────
-const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ─────────────────────────────────────────────────────────
-// STATE
-// ─────────────────────────────────────────────────────────
-let allAnimes = [];
-let activeStatus = null;
-let activeGenre = null;
-let currentView = 'grid';
-let currentPage = 'library';
-let editId = null;
-let debounceTimer = null;
+// ── Init Supabase ──────────────────────────────────────────
+let db;
+try {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY ||
+      SUPABASE_URL.includes('TU_') || SUPABASE_ANON_KEY.includes('TU_')) {
+    throw new Error('config');
+  }
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} catch (e) {
+  document.getElementById('animeGrid').innerHTML =
+    `<div class="loading-state">
+       <div style="font-size:32px">⚙️</div>
+       <p style="color:var(--text)">Configura Supabase en config.js</p>
+       <span>Añade tu SUPABASE_URL y SUPABASE_ANON_KEY</span>
+     </div>`;
+}
 
-const STATUS_LIST = ['Visto', 'Viendo', 'No visto', 'Pendiente', 'Abandonado'];
-const STATUS_SLUG = s => (s || 'novisto').toLowerCase().replace(' ', '');
-const STATUS_CLASS = s => 's-' + STATUS_SLUG(s);
-const DOT_CLASS   = s => 'dot-' + STATUS_SLUG(s);
-const BAR_CLASS   = s => 'bar-' + STATUS_SLUG(s);
+// ── Poster cache (sessionStorage) ────────────────────────
+const POSTER_CACHE_KEY = 'anitrack_posters';
+let posterCache = {};
+try { posterCache = JSON.parse(sessionStorage.getItem(POSTER_CACHE_KEY) || '{}'); } catch {}
+function savePosterCache() {
+  try { sessionStorage.setItem(POSTER_CACHE_KEY, JSON.stringify(posterCache)); } catch {}
+}
 
-// ─────────────────────────────────────────────────────────
-// INIT
-// ─────────────────────────────────────────────────────────
-async function init() {
-  showLoading(true);
+// Obtiene la URL de portada desde Jikan (MAL)
+async function fetchPoster(title) {
+  if (posterCache[title] !== undefined) return posterCache[title];
+
+  const query = encodeURIComponent(title.trim());
+  try {
+    const res = await fetch(`https://api.jikan.moe/v4/anime?q=${query}&limit=1&sfw`);
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    const img = data.data?.[0]?.images?.jpg?.large_image_url
+              || data.data?.[0]?.images?.jpg?.image_url
+              || null;
+    posterCache[title] = img;
+    savePosterCache();
+    return img;
+  } catch {
+    posterCache[title] = null;
+    savePosterCache();
+    return null;
+  }
+}
+
+// ── State ─────────────────────────────────────────────────
+let allAnimes   = [];
+let filterStatus = 'all';
+let filterGenre  = null;
+let searchQuery  = '';
+let sortMode     = 'name';
+let viewMode     = 'grid';   // grid | list
+let editingId    = null;
+
+// ── DOM refs ─────────────────────────────────────────────
+const grid        = document.getElementById('animeGrid');
+const emptyState  = document.getElementById('emptyState');
+const searchInput = document.getElementById('searchInput');
+const sortSelect  = document.getElementById('sortSelect');
+
+// ── Load data ─────────────────────────────────────────────
+async function loadAnimes() {
+  if (!db) return;
   const { data, error } = await db
     .from('animes')
     .select('*')
-    .order('name', { ascending: true });
+    .order('created_at', { ascending: false });
 
-  if (error) {
-    showLoading(false);
-    showToast('Error al conectar con Supabase. Revisa config.js.', 'error');
-    console.error(error);
-    return;
-  }
-
+  if (error) { showToast('Error al cargar datos'); return; }
   allAnimes = data || [];
-  showLoading(false);
-  buildSidebarFilters();
-  render();
+  renderAll();
 }
 
-// ─────────────────────────────────────────────────────────
-// FILTERING & SORTING
-// ─────────────────────────────────────────────────────────
+// ── Render ─────────────────────────────────────────────────
 function getFiltered() {
-  const q = document.getElementById('searchInput').value.toLowerCase().trim();
-  const sort = document.getElementById('sortSelect').value;
+  let list = [...allAnimes];
 
-  let list = allAnimes.filter(a => {
-    const matchQ = !q ||
+  if (filterStatus !== 'all') {
+    list = list.filter(a => a.status === filterStatus);
+  }
+  if (filterGenre) {
+    list = list.filter(a => a.genre && a.genre.toLowerCase().includes(filterGenre.toLowerCase()));
+  }
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    list = list.filter(a =>
       (a.name || '').toLowerCase().includes(q) ||
-      (a.descripcion || '').toLowerCase().includes(q) ||
-      (a.genre || '').toLowerCase().includes(q);
-    const matchS = !activeStatus || (a.status || '') === activeStatus;
-    const matchG = !activeGenre || (a.genre || '') === activeGenre;
-    return matchQ && matchS && matchG;
-  });
+      (a.genre || '').toLowerCase().includes(q) ||
+      (a.descripcion || '').toLowerCase().includes(q)
+    );
+  }
 
   list.sort((a, b) => {
-    if (sort === 'name_asc')   return (a.name || '').localeCompare(b.name || '');
-    if (sort === 'name_desc')  return (b.name || '').localeCompare(a.name || '');
-    if (sort === 'score_desc') return (b.score || 0) - (a.score || 0);
-    if (sort === 'score_asc')  return (a.score || 0) - (b.score || 0);
+    if (sortMode === 'name')       return (a.name||'').localeCompare(b.name||'');
+    if (sortMode === 'score_desc') return (b.score||0) - (a.score||0);
+    if (sortMode === 'score_asc')  return (a.score||0) - (b.score||0);
+    if (sortMode === 'recent')     return new Date(b.created_at) - new Date(a.created_at);
     return 0;
   });
-
   return list;
 }
 
-// ─────────────────────────────────────────────────────────
-// RENDER LIBRARY
-// ─────────────────────────────────────────────────────────
-function render() {
-  const list = getFiltered();
-  const grid = document.getElementById('animeGrid');
-  const empty = document.getElementById('emptyState');
-  const badge = document.getElementById('countBadge');
+function renderAll() {
+  updateCounts();
+  updateGenreFilters();
+  updateStats();
+  renderGrid();
+  updateActiveFilters();
+}
 
-  badge.textContent = list.length + ' títulos';
+async function renderGrid() {
+  const list = getFiltered();
 
   if (!list.length) {
     grid.innerHTML = '';
-    empty.style.display = 'flex';
+    emptyState.classList.remove('hidden');
     return;
   }
-  empty.style.display = 'none';
+  emptyState.classList.add('hidden');
 
-  grid.innerHTML = list.map((a, i) => buildCard(a, i)).join('');
-  buildSidebarFilters();
+  // Render placeholders immediately
+  grid.innerHTML = list.map(a => cardHTML(a, null)).join('');
+
+  // Fetch posters in batches (respect Jikan rate limit: ~3 req/s)
+  const BATCH = 3;
+  const DELAY = 400; // ms between batches
+
+  for (let i = 0; i < list.length; i += BATCH) {
+    const batch = list.slice(i, i + BATCH);
+    await Promise.all(batch.map(async a => {
+      const url = await fetchPoster(a.name);
+      const posterEl = document.getElementById(`poster-${a.id}`);
+      if (posterEl && url) {
+        posterEl.innerHTML = `<img src="${url}" alt="${escHtml(a.name)}" loading="lazy" onerror="this.parentElement.innerHTML=initials('${escHtml(a.name)}')" />`;
+      }
+    }));
+    if (i + BATCH < list.length) await sleep(DELAY);
+  }
 }
 
-function buildCard(a, i) {
-  const slug = STATUS_SLUG(a.status);
-  const scoreHtml = a.score > 0
-    ? `<div class="score-badge">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
-        ${parseFloat(a.score).toFixed(1)}
-      </div>`
-    : '';
-  const nameHtml = a.link
-    ? `<a href="${esc(a.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.name)}</a>`
-    : esc(a.name);
+function cardHTML(a, posterUrl) {
+  const statusClass = statusCssClass(a.status);
+  const posterContent = posterUrl
+    ? `<img src="${escHtml(posterUrl)}" alt="${escHtml(a.name)}" loading="lazy" onerror="this.parentElement.innerHTML=initials('${escHtml(a.name)}')" />`
+    : `<div class="card-poster-placeholder">${getInitials(a.name)}</div>`;
 
-  const delay = Math.min(i * 30, 300);
+  if (viewMode === 'list') {
+    return `
+    <div class="anime-card" onclick="openDetail('${a.id}')">
+      <div class="card-poster" id="poster-${a.id}">${posterContent}</div>
+      <div class="card-info">
+        <span class="card-name">${escHtml(a.name)}</span>
+        <span class="card-genre">${escHtml(a.genre || '—')}</span>
+        <span class="list-score">${a.score != null ? a.score : '—'}</span>
+        <span class="list-status">
+          <span class="list-status-dot">
+            <span class="list-dot" style="background:${statusColor(a.status)}"></span>
+            ${escHtml(a.status || '—')}
+          </span>
+        </span>
+      </div>
+    </div>`;
+  }
 
   return `
-  <div class="anime-card" style="animation-delay:${delay}ms" onclick="editAnime('${a.id}')">
-    <div class="card-color-bar ${BAR_CLASS(a.status)}"></div>
-    <div class="card-body">
-      <div class="card-top">
-        <div class="card-name">${nameHtml}</div>
-        ${scoreHtml}
-      </div>
-      <div class="card-genre">${esc(a.genre || '—')}</div>
-      <div class="card-desc">${esc(a.descripcion || 'Sin descripción.')}</div>
-      <div class="card-footer">
-        <span class="status-pill ${STATUS_CLASS(a.status)}">${esc(a.status || 'No visto')}</span>
-        <div class="card-actions">
-          <button class="action-btn" onclick="event.stopPropagation(); editAnime('${a.id}')" title="Editar">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="action-btn delete" onclick="event.stopPropagation(); deleteAnime('${a.id}', '${esc(a.name)}')" title="Eliminar">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-          </button>
-        </div>
-      </div>
+  <div class="anime-card" onclick="openDetail('${a.id}')">
+    <div class="card-poster" id="poster-${a.id}">
+      ${posterContent}
+      <span class="card-status-badge ${statusClass}">${escHtml(a.status || '')}</span>
+      ${a.score != null ? `<span class="card-score-badge">★ ${a.score}</span>` : ''}
+    </div>
+    <div class="card-info">
+      <span class="card-name">${escHtml(a.name)}</span>
+      <span class="card-genre">${escHtml(a.genre || '')}</span>
     </div>
   </div>`;
 }
 
-// ─────────────────────────────────────────────────────────
-// SIDEBAR FILTERS
-// ─────────────────────────────────────────────────────────
-function buildSidebarFilters() {
-  // Status chips
-  const statusCounts = {};
-  STATUS_LIST.forEach(s => statusCounts[s] = 0);
-  allAnimes.forEach(a => { if (statusCounts[a.status] !== undefined) statusCounts[a.status]++; });
-
-  document.getElementById('statusFilters').innerHTML = STATUS_LIST.map(s => `
-    <button class="filter-chip ${activeStatus === s ? 'active' : ''}" onclick="toggleStatus('${s}')">
-      <span class="chip-left">
-        <span class="chip-dot ${DOT_CLASS(s)}"></span>${s}
-      </span>
-      <span class="chip-count">${statusCounts[s]}</span>
-    </button>
-  `).join('');
-
-  // Genre chips
-  const genres = [...new Set(allAnimes.map(a => a.genre).filter(Boolean))].sort();
-  const genreCounts = {};
-  genres.forEach(g => genreCounts[g] = allAnimes.filter(a => a.genre === g).length);
-
-  document.getElementById('genreFilters').innerHTML = genres.map(g => `
-    <button class="filter-chip ${activeGenre === g ? 'active' : ''}" onclick="toggleGenre('${esc(g)}')">
-      <span class="chip-left">
-        <span class="chip-dot" style="background:var(--text3)"></span>${esc(g)}
-      </span>
-      <span class="chip-count">${genreCounts[g]}</span>
-    </button>
-  `).join('');
-
-  // Datalist for form
-  document.getElementById('genreDatalist').innerHTML = genres.map(g => `<option value="${esc(g)}">`).join('');
+// ── Counts & filters ──────────────────────────────────────
+function updateCounts() {
+  const count = s => allAnimes.filter(a => a.status === s).length;
+  document.getElementById('count-all').textContent       = allAnimes.length;
+  document.getElementById('count-visto').textContent     = count('Visto');
+  document.getElementById('count-viendo').textContent    = count('Viendo');
+  document.getElementById('count-pendiente').textContent = count('Pendiente');
+  document.getElementById('count-novisto').textContent   = count('No visto');
+  document.getElementById('count-abandonado').textContent= count('Abandonado');
 }
 
-function toggleStatus(s) {
-  activeStatus = activeStatus === s ? null : s;
-  render();
-}
-function toggleGenre(g) {
-  activeGenre = activeGenre === g ? null : g;
-  render();
+function updateStats() {
+  document.getElementById('stat-total').textContent = allAnimes.length;
+  const scores = allAnimes.map(a => a.score).filter(s => s != null);
+  const avg = scores.length ? (scores.reduce((s,v) => s+v, 0) / scores.length).toFixed(1) : '—';
+  document.getElementById('stat-score').textContent = avg;
 }
 
-// ─────────────────────────────────────────────────────────
-// STATS VIEW
-// ─────────────────────────────────────────────────────────
-function renderStats() {
-  const total = allAnimes.length;
-  const scored = allAnimes.filter(a => a.score > 0);
-  const avgScore = scored.length ? (scored.reduce((s, a) => s + a.score, 0) / scored.length) : 0;
-  const topGenre = (() => {
-    const cnt = {};
-    allAnimes.forEach(a => { if (a.genre) cnt[a.genre] = (cnt[a.genre] || 0) + 1; });
-    return Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
-  })();
-  const vistos = allAnimes.filter(a => a.status === 'Visto').length;
+function updateGenreFilters() {
+  const genres = [...new Set(
+    allAnimes.flatMap(a => (a.genre || '').split(',').map(g => g.trim()).filter(Boolean))
+  )].sort();
 
-  document.getElementById('statsGrid').innerHTML = `
-    <div class="stat-card"><div class="stat-num" style="color:var(--text)">${total}</div><div class="stat-label">Total en biblioteca</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--green)">${vistos}</div><div class="stat-label">Completados</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--gold)">${avgScore > 0 ? avgScore.toFixed(1) : '—'}</div><div class="stat-label">Puntuación media</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--accent);font-size:28px;padding-top:8px">${topGenre}</div><div class="stat-label">Género favorito</div></div>
-  `;
-
-  // Status bars
-  const statusData = STATUS_LIST.map(s => ({
-    label: s,
-    count: allAnimes.filter(a => a.status === s).length
-  }));
-  const maxCount = Math.max(...statusData.map(s => s.count), 1);
-
-  const barsHtml = statusData.map(s => `
-    <div class="bar-row">
-      <div class="bar-row-label">${s.label}</div>
-      <div class="bar-track">
-        <div class="bar-fill ${BAR_CLASS(s.label)}" style="width:${Math.round(s.count / maxCount * 100)}%"></div>
-      </div>
-      <div class="bar-row-count">${s.count}</div>
-    </div>
-  `).join('');
-
-  // Genre list
-  const genres = [...new Set(allAnimes.map(a => a.genre).filter(Boolean))].sort();
-  const genreCounts = genres.map(g => ({ g, n: allAnimes.filter(a => a.genre === g).length }))
-    .sort((a, b) => b.n - a.n).slice(0, 10);
-
-  const genreHtml = genreCounts.map(({ g, n }) => `
-    <div class="genre-item"><span class="genre-item-name">${esc(g)}</span><span class="genre-item-count">${n}</span></div>
-  `).join('');
-
-  document.getElementById('chartsRow').innerHTML = `
-    <div class="chart-card">
-      <div class="chart-title">Por estado</div>
-      <div class="bar-chart">${barsHtml}</div>
-    </div>
-    <div class="chart-card">
-      <div class="chart-title">Por género</div>
-      <div class="genre-list">${genreHtml || '<p style="color:var(--text3);font-size:13px">Sin datos</p>'}</div>
-    </div>
-  `;
+  const container = document.getElementById('genreFilters');
+  container.innerHTML = `<p class="nav-label">Género</p>` +
+    genres.map(g => `<button class="genre-btn${filterGenre === g ? ' active' : ''}" onclick="setGenre('${escHtml(g)}')">${escHtml(g)}</button>`).join('');
 }
 
-// ─────────────────────────────────────────────────────────
-// VIEW SWITCHING
-// ─────────────────────────────────────────────────────────
-function switchView(view, btn) {
-  currentPage = view;
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-
-  document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
-  document.getElementById('view-' + view).style.display = 'block';
-
-  if (view === 'stats') renderStats();
+function updateActiveFilters() {
+  const el = document.getElementById('activeFilters');
+  const pills = [];
+  if (filterStatus !== 'all') pills.push({ label: filterStatus, clear: () => setStatus('all') });
+  if (filterGenre)            pills.push({ label: filterGenre,  clear: () => setGenre(null) });
+  if (searchQuery)            pills.push({ label: `"${searchQuery}"`, clear: () => { searchInput.value=''; setSearch(''); } });
+  el.innerHTML = pills.map((p,i) =>
+    `<div class="filter-pill">${escHtml(p.label)}<button onclick="clearFilter(${i})">×</button></div>`
+  ).join('');
+  window._filterClears = pills.map(p => p.clear);
 }
 
-function setView(mode) {
-  currentView = mode;
-  document.getElementById('animeGrid').className = 'anime-grid' + (mode === 'list' ? ' list-view' : '');
-  document.getElementById('gridBtn').classList.toggle('active', mode === 'grid');
-  document.getElementById('listBtn').classList.toggle('active', mode === 'list');
-}
+window.clearFilter = i => { window._filterClears?.[i]?.(); };
 
-// ─────────────────────────────────────────────────────────
-// MODAL
-// ─────────────────────────────────────────────────────────
-function openModal() {
-  editId = null;
-  document.getElementById('modalHeading').textContent = 'Añadir anime';
-  clearForm();
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('fName').focus();
-}
+// ── Filter setters ────────────────────────────────────────
+window.setStatus = function(s) {
+  filterStatus = s;
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === s);
+  });
+  renderAll();
+};
 
-function editAnime(id) {
+window.setGenre = function(g) {
+  filterGenre = g === filterGenre ? null : g;
+  renderAll();
+};
+
+function setSearch(q) { searchQuery = q; renderAll(); }
+
+// ── Detail modal ──────────────────────────────────────────
+window.openDetail = async function(id) {
   const a = allAnimes.find(x => x.id === id);
   if (!a) return;
-  editId = id;
-  document.getElementById('modalHeading').textContent = 'Editar anime';
-  document.getElementById('fName').value = a.name || '';
-  document.getElementById('fScore').value = a.score || '';
-  document.getElementById('fGenre').value = a.genre || '';
-  document.getElementById('fStatus').value = a.status || 'No visto';
-  document.getElementById('fLink').value = a.link || '';
-  document.getElementById('fDesc').value = a.descripcion || '';
-  document.getElementById('modalOverlay').classList.add('open');
-}
+  editingId = id;
 
-function closeModal() {
-  document.getElementById('modalOverlay').classList.remove('open');
-  editId = null;
-}
+  document.getElementById('detailName').textContent   = a.name || '';
+  document.getElementById('detailGenre').textContent  = a.genre || '';
+  document.getElementById('detailDesc').textContent   = a.descripcion || 'Sin descripción.';
+  document.getElementById('detailScore').textContent  = a.score != null ? `★ ${a.score}` : '';
+  const statusEl = document.getElementById('detailStatus');
+  statusEl.textContent = a.status || '';
+  statusEl.className = `detail-status ${statusCssClass(a.status)}`;
 
-function closeModalOutside(e) {
+  const linkEl = document.getElementById('detailLink');
+  if (a.link) { linkEl.href = a.link; linkEl.style.display = ''; }
+  else linkEl.style.display = 'none';
+
+  const img = document.getElementById('detailImg');
+  const poster = posterCache[a.name] || await fetchPoster(a.name);
+  img.src = poster || '';
+  img.style.display = poster ? '' : 'none';
+
+  document.getElementById('detailOverlay').classList.remove('hidden');
+};
+
+document.getElementById('closeDetail').onclick = () => {
+  document.getElementById('detailOverlay').classList.add('hidden');
+};
+document.getElementById('detailOverlay').onclick = e => {
+  if (e.target === document.getElementById('detailOverlay'))
+    document.getElementById('detailOverlay').classList.add('hidden');
+};
+
+document.getElementById('detailEdit').onclick = () => {
+  document.getElementById('detailOverlay').classList.add('hidden');
+  openEditModal(editingId);
+};
+
+document.getElementById('detailDelete').onclick = async () => {
+  if (!confirm('¿Eliminar este anime?')) return;
+  const { error } = await db.from('animes').delete().eq('id', editingId);
+  if (error) { showToast('Error al eliminar'); return; }
+  allAnimes = allAnimes.filter(a => a.id !== editingId);
+  document.getElementById('detailOverlay').classList.add('hidden');
+  renderAll();
+  showToast('Anime eliminado');
+};
+
+// ── Add / Edit modal ──────────────────────────────────────
+document.getElementById('openModal').onclick = () => openAddModal();
+document.getElementById('closeModal').onclick  = closeModal;
+document.getElementById('cancelModal').onclick = closeModal;
+document.getElementById('modalOverlay').onclick = e => {
   if (e.target === document.getElementById('modalOverlay')) closeModal();
-}
+};
 
-function clearForm() {
-  ['fName', 'fScore', 'fGenre', 'fLink', 'fDesc'].forEach(id => document.getElementById(id).value = '');
+function openAddModal() {
+  editingId = null;
+  document.getElementById('modalTitle').textContent = 'Nuevo Anime';
+  document.getElementById('editId').value = '';
+  ['fName','fScore','fGenre','fLink','fDesc'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('fStatus').value = 'No visto';
+  document.getElementById('modalOverlay').classList.remove('hidden');
+  setTimeout(() => document.getElementById('fName').focus(), 50);
 }
 
-// ─────────────────────────────────────────────────────────
-// CRUD
-// ─────────────────────────────────────────────────────────
-async function saveAnime() {
+function openEditModal(id) {
+  const a = allAnimes.find(x => x.id === id);
+  if (!a) return;
+  editingId = id;
+  document.getElementById('modalTitle').textContent = 'Editar Anime';
+  document.getElementById('editId').value    = a.id;
+  document.getElementById('fName').value     = a.name || '';
+  document.getElementById('fScore').value    = a.score ?? '';
+  document.getElementById('fGenre').value    = a.genre || '';
+  document.getElementById('fStatus').value   = a.status || 'No visto';
+  document.getElementById('fLink').value     = a.link || '';
+  document.getElementById('fDesc').value     = a.descripcion || '';
+  document.getElementById('modalOverlay').classList.remove('hidden');
+}
+
+function closeModal() { document.getElementById('modalOverlay').classList.add('hidden'); }
+
+document.getElementById('saveAnime').onclick = async () => {
   const name = document.getElementById('fName').value.trim();
-  if (!name) { showToast('El título es obligatorio.', 'error'); return; }
+  if (!name) { showToast('El nombre es obligatorio'); return; }
 
   const payload = {
     name,
-    score: parseFloat(document.getElementById('fScore').value) || null,
-    genre: document.getElementById('fGenre').value.trim() || null,
-    status: document.getElementById('fStatus').value,
-    link: document.getElementById('fLink').value.trim() || null,
-    descripcion: document.getElementById('fDesc').value.trim() || null,
+    score:      parseFloat(document.getElementById('fScore').value) || null,
+    genre:      document.getElementById('fGenre').value.trim() || null,
+    status:     document.getElementById('fStatus').value,
+    link:       document.getElementById('fLink').value.trim() || null,
+    descripcion:document.getElementById('fDesc').value.trim() || null,
   };
 
-  const saveBtn = document.getElementById('saveBtn');
-  saveBtn.disabled = true;
-  saveBtn.textContent = 'Guardando…';
-
-  let error;
-
-  if (editId) {
-    const res = await db.from('animes').update(payload).eq('id', editId);
-    error = res.error;
-    if (!error) {
-      const idx = allAnimes.findIndex(a => a.id === editId);
-      if (idx !== -1) allAnimes[idx] = { ...allAnimes[idx], ...payload };
-      showToast('Anime actualizado ✓', 'success');
-    }
+  const id = document.getElementById('editId').value;
+  if (id) {
+    const { error } = await db.from('animes').update(payload).eq('id', id);
+    if (error) { showToast('Error al guardar'); return; }
+    const idx = allAnimes.findIndex(a => a.id === id);
+    if (idx >= 0) allAnimes[idx] = { ...allAnimes[idx], ...payload };
+    // Invalidate poster cache if name changed
+    if (allAnimes[idx] && allAnimes[idx].name !== name) delete posterCache[allAnimes[idx].name];
+    showToast('Anime actualizado ✓');
   } else {
-    const res = await db.from('animes').insert([payload]).select();
-    error = res.error;
-    if (!error && res.data?.length) {
-      allAnimes.push(res.data[0]);
-      showToast('Anime añadido ✓', 'success');
-    }
+    const { data, error } = await db.from('animes').insert(payload).select().single();
+    if (error) { showToast('Error al guardar'); return; }
+    allAnimes.unshift(data);
+    showToast('Anime añadido ✓');
   }
 
-  saveBtn.disabled = false;
-  saveBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Guardar`;
-
-  if (error) { showToast('Error: ' + error.message, 'error'); return; }
-
   closeModal();
-  buildSidebarFilters();
-  render();
-}
+  renderAll();
+};
 
-async function deleteAnime(id, name) {
-  if (!confirm(`¿Eliminar "${name}"? Esta acción no se puede deshacer.`)) return;
+// ── Sidebar nav ───────────────────────────────────────────
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.onclick = () => setStatus(btn.dataset.filter);
+});
 
-  const { error } = await db.from('animes').delete().eq('id', id);
-  if (error) { showToast('Error al eliminar: ' + error.message, 'error'); return; }
+// ── Sort & view ───────────────────────────────────────────
+sortSelect.onchange = () => { sortMode = sortSelect.value; renderAll(); };
 
-  allAnimes = allAnimes.filter(a => a.id !== id);
-  showToast('Anime eliminado.', 'success');
-  buildSidebarFilters();
-  render();
-}
+document.getElementById('gridBtn').onclick = () => {
+  viewMode = 'grid';
+  grid.classList.remove('list-view');
+  document.getElementById('gridBtn').classList.add('active');
+  document.getElementById('listBtn').classList.remove('active');
+  renderGrid();
+};
+document.getElementById('listBtn').onclick = () => {
+  viewMode = 'list';
+  grid.classList.add('list-view');
+  document.getElementById('listBtn').classList.add('active');
+  document.getElementById('gridBtn').classList.remove('active');
+  renderGrid();
+};
 
-// ─────────────────────────────────────────────────────────
-// UI HELPERS
-// ─────────────────────────────────────────────────────────
-function showLoading(show) {
-  document.getElementById('loadingState').style.display = show ? 'flex' : 'none';
-  document.getElementById('animeGrid').style.display = show ? 'none' : 'grid';
-}
+// ── Search ────────────────────────────────────────────────
+searchInput.addEventListener('input', () => setSearch(searchInput.value.trim()));
 
-function showToast(msg, type = '') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast show ' + type;
-  clearTimeout(t._timer);
-  t._timer = setTimeout(() => { t.className = 'toast'; }, 3000);
-}
-
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-}
-
-function debounceRender() {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(render, 200);
-}
-
-function esc(s) {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-// ─────────────────────────────────────────────────────────
-// KEYBOARD
-// ─────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeModal();
-  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
-    document.getElementById('searchInput').focus();
+    searchInput.focus();
+  }
+  if (e.key === 'Escape') {
+    closeModal();
+    document.getElementById('detailOverlay').classList.add('hidden');
+    document.getElementById('sidebar').classList.remove('open');
   }
 });
 
-// ─────────────────────────────────────────────────────────
-// START
-// ─────────────────────────────────────────────────────────
-init();
+// ── Hamburger ─────────────────────────────────────────────
+document.getElementById('hamburger').onclick = () => {
+  document.getElementById('sidebar').classList.toggle('open');
+};
+
+// ── Toast ─────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 2500);
+}
+
+// ── Helpers ───────────────────────────────────────────────
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function getInitials(name) {
+  return (name || '?').split(' ').slice(0,2).map(w => w[0]).join('').toUpperCase();
+}
+// Used inline in onerror
+window.initials = n => `<div class="card-poster-placeholder">${getInitials(n)}</div>`;
+
+function statusCssClass(s) {
+  const map = { 'Visto':'status-visto','Viendo':'status-viendo','Pendiente':'status-pendiente','No visto':'status-novisto','Abandonado':'status-abandonado' };
+  return map[s] || '';
+}
+function statusColor(s) {
+  const map = { 'Visto':'#4ade80','Viendo':'#60a5fa','Pendiente':'#fbbf24','No visto':'#94a3b8','Abandonado':'#f87171' };
+  return map[s] || '#94a3b8';
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Boot ──────────────────────────────────────────────────
+loadAnimes();

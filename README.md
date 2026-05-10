@@ -1,16 +1,27 @@
-# 🎌 Anime List — Guía de instalación
+# AniTrack
 
-Aplicación web para gestionar tu biblioteca de anime con **Supabase** (base de datos gratuita) y **Vercel** (hosting gratuito).
+Aplicación web para listar, filtrar y gestionar tu colección de anime.
+
+## Archivos
+
+| Archivo | Descripción |
+|---------|-------------|
+| `index.html` | Estructura de la página |
+| `style.css` | Estilos |
+| `app.js` | Lógica, conexión Supabase + Jikan API |
+| `config.js` | **Tus credenciales de Supabase** |
 
 ---
 
-## PASO 1 — Crear la base de datos en Supabase
+## Configuración Supabase
 
-1. Ve a **https://supabase.com** y crea una cuenta gratuita.
-2. Haz clic en **"New project"**, elige nombre (ej: `animelist`) y una contraseña. Guarda bien esa contraseña.
-3. Espera ~1 minuto a que se aprovisione el proyecto.
-4. En el menú izquierdo ve a **SQL Editor** y ejecuta este SQL para crear la tabla:
+El `config.js` ya tiene tus credenciales actuales:
+```
+SUPABASE_URL  = https://tpgzqjloeqydnidtcnro.supabase.co
+SUPABASE_ANON_KEY = sb_publishable_T_LNcecSxmPOaWrzpEeOlw_DHTeTpnu
+```
 
+### SQL para crear la tabla (si aún no la has creado):
 ```sql
 create table animes (
   id uuid default gen_random_uuid() primary key,
@@ -22,96 +33,34 @@ create table animes (
   descripcion text,
   created_at timestamp with time zone default now()
 );
-
--- Permite lectura y escritura pública (ajusta si quieres autenticación)
 alter table animes enable row level security;
 create policy "public access" on animes for all using (true) with check (true);
 ```
 
-5. Ve a **Settings → API** y copia:
-   - **Project URL** (algo como `https://xxxx.supabase.co`)
-   - **anon public key** (la clave larga bajo "Project API keys")
+---
+
+## Portadas automáticas (Jikan API)
+
+Las portadas se obtienen automáticamente de MyAnimeList usando la API gratuita de Jikan.
+- No requiere registro ni API key
+- Se cachean en sessionStorage para no repetir peticiones
+- Si no encuentra una portada, muestra las iniciales del título
+- Rate limit: ~3 peticiones/segundo (la app lo gestiona sola)
 
 ---
 
-## PASO 2 — Configurar la aplicación
+## Despliegue en Vercel
 
-Abre el archivo **`config.js`** y rellena con tus datos:
+1. Sube los 4 archivos a un repositorio de GitHub
+2. En [vercel.com](https://vercel.com), importa el repositorio
+3. Deploy en 30 segundos → URL pública con HTTPS
 
-```js
-const SUPABASE_URL = 'https://TU_PROJECT_ID.supabase.co';  // ← tu Project URL
-const SUPABASE_ANON_KEY = 'TU_ANON_KEY_AQUI';              // ← tu anon key
-```
-
----
-
-## PASO 3 — Importar tus datos del Excel (opcional)
-
-En Supabase, ve a **Table Editor → animes → Import data** y sube un CSV.
-
-El CSV debe tener estas columnas (puedes exportarlo desde Excel):
-
-```
-name,genre,score,status,link,desc
-Naruto,Shonen,8.5,Visto,https://mal.net/...,Un ninja que sueña con ser Hokage.
-One Piece,Aventura,9.0,Viendo,,La búsqueda del tesoro definitivo.
-```
-
-O bien usa la app para añadirlos uno a uno con el botón **"Añadir anime"**.
+O arrastra la carpeta directamente a Vercel sin necesidad de GitHub.
 
 ---
 
-## PASO 4 — Subir a Vercel (hosting gratuito)
+## Importar datos del Excel
 
-### Opción A — Desde GitHub (recomendada)
-
-1. Sube la carpeta del proyecto a **GitHub** (crea un repo nuevo).
-2. Ve a **https://vercel.com**, crea cuenta gratuita con tu GitHub.
-3. Haz clic en **"Add New Project"**, selecciona tu repositorio.
-4. No hace falta configurar nada más. Haz clic en **Deploy**.
-5. En ~30 segundos tendrás una URL pública como `https://animelist-xxx.vercel.app`.
-
-### Opción B — Arrastrando archivos
-
-1. Ve a **https://vercel.com/new**
-2. Arrastra la carpeta entera del proyecto
-3. Vercel la despliega automáticamente
-
----
-
-## PASO 5 — ¡Listo!
-
-Tu app estará en `https://tu-proyecto.vercel.app` con:
-
-- ✅ Base de datos real persistente en Supabase
-- ✅ Hosting gratuito con HTTPS en Vercel
-- ✅ Accesible desde cualquier dispositivo
-- ✅ Sin límite de tiempo (plan gratuito de Supabase dura mientras haya actividad)
-
----
-
-## Estructura de archivos
-
-```
-animelist/
-├── index.html   → Estructura HTML
-├── style.css    → Estilos (tema oscuro editorial)
-├── config.js    → 🔑 TUS credenciales de Supabase (rellena esto)
-├── app.js       → Lógica de la aplicación
-└── README.md    → Esta guía
-```
-
----
-
-## Funcionalidades
-
-| Función | Descripción |
-|---|---|
-| 📚 Biblioteca | Vista en cuadrícula o lista con filtros |
-| 🔍 Búsqueda | Por título, género o descripción (Ctrl+K) |
-| 🏷️ Filtros | Por estado y género en la barra lateral |
-| 📊 Estadísticas | Gráficos de estado, géneros, puntuación media |
-| ➕ Añadir | Formulario completo con todos los campos |
-| ✏️ Editar | Click en cualquier tarjeta |
-| 🗑️ Eliminar | Botón en hover sobre la tarjeta |
-| 📱 Responsive | Funciona en móvil y escritorio |
+1. En tu Google Sheets, exporta la hoja como CSV (Archivo → Descargar → CSV)
+2. Asegúrate de que las cabeceras sean: `name`, `genre`, `score`, `status`, `link`, `descripcion`
+3. En Supabase → Table Editor → `animes` → Import data from CSV

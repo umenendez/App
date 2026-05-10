@@ -1,7 +1,9 @@
 // ─────────────────────────────────────────────────────────
 // CONFIGURACIÓN — rellena con tus datos de Supabase
-// Instrucciones en README.md
 // ─────────────────────────────────────────────────────────
+// Copia la Project URL y la Publishable/Anon key desde:
+//   supabase.com → tu proyecto → Connect → App Frameworks
+// O desde Settings → API Keys
 
-const SUPABASE_URL = 'https://tpgzqjloeqydnidtcnro.supabase.co/rest/v1/';
+const SUPABASE_URL  = 'https://tpgzqjloeqydnidtcnro.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_T_LNcecSxmPOaWrzpEeOlw_DHTeTpnu';
