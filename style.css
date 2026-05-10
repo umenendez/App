@@ -353,32 +353,68 @@ body {
   background: linear-gradient(135deg, var(--bg3), var(--bg));
 }
 
+.card-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+  backdrop-filter: blur(2px);
+}
+.anime-card:hover .card-overlay { opacity: 1; }
+
+.card-visit-btn {
+  background: var(--accent);
+  color: #fff;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 20px;
+  text-decoration: none;
+  letter-spacing: 0.5px;
+  transition: background 0.15s, transform 0.15s;
+  box-shadow: 0 4px 12px rgba(230,52,98,0.5);
+}
+.card-visit-btn:hover { background: var(--accent2); transform: scale(1.05); }
+
 .card-status-badge {
   position: absolute;
   top: 8px;
   right: 8px;
-  padding: 3px 8px;
+  padding: 4px 9px;
   border-radius: 6px;
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
-  background: rgba(0,0,0,0.7);
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.15);
 }
+/* Status-specific badge colors — high contrast */
+.card-status-badge.status-visto      { background: rgba(74,222,128,0.25); color: #86efac; border-color: rgba(74,222,128,0.4); }
+.card-status-badge.status-viendo     { background: rgba(96,165,250,0.25); color: #93c5fd; border-color: rgba(96,165,250,0.4); }
+.card-status-badge.status-pendiente  { background: rgba(251,191,36,0.25); color: #fde68a; border-color: rgba(251,191,36,0.4); }
+.card-status-badge.status-novisto    { background: rgba(148,163,184,0.2); color: #cbd5e1; border-color: rgba(148,163,184,0.3); }
+.card-status-badge.status-abandonado { background: rgba(248,113,113,0.25); color: #fca5a5; border-color: rgba(248,113,113,0.4); }
 
 .card-score-badge {
   position: absolute;
   bottom: 8px;
   left: 8px;
-  padding: 3px 8px;
+  padding: 4px 9px;
   border-radius: 6px;
   font-family: 'Bebas Neue', sans-serif;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: 1px;
-  background: rgba(0,0,0,0.8);
-  backdrop-filter: blur(4px);
-  color: #fbbf24;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(6px);
+  color: #fde68a;
+  border: 1px solid rgba(251,191,36,0.35);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
 }
 
 .card-info {
@@ -436,11 +472,12 @@ body {
 .list-score {
   font-family: 'Bebas Neue', sans-serif;
   font-size: 18px;
-  color: #fbbf24;
+  color: #fde68a;
   width: 36px;
   text-align: right;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
 }
-.list-status { width: 90px; }
+.list-status { width: 110px; display: flex; align-items: center; gap: 6px; }
 .list-status-dot {
   display: inline-flex;
   align-items: center;
@@ -448,7 +485,20 @@ body {
   font-size: 12px;
   color: var(--text2);
 }
-.list-dot { width: 7px; height: 7px; border-radius: 50%; }
+.list-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+.list-visit-btn {
+  font-size: 12px;
+  color: var(--accent2);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid rgba(230,52,98,0.3);
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: all 0.15s;
+  background: rgba(230,52,98,0.08);
+}
+.list-visit-btn:hover { background: rgba(230,52,98,0.2); border-color: var(--accent); color: #fff; }
 
 /* Status colors */
 .status-visto   { color: var(--visto); }
