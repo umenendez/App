@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anime List</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;500;700&family=Noto+Serif+JP:wght@300;400&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-mark">AL</span>
+      <span class="logo-text">ANIME<br>LIST</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-view="library" onclick="switchView('library',this)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Biblioteca
+      </button>
+      <button class="nav-item" data-view="stats" onclick="switchView('stats',this)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+        Estadísticas
+      </button>
+    </nav>
+
+    <div class="sidebar-filters">
+      <div class="filter-label">Estado</div>
+      <div class="status-filter-list" id="statusFilters"></div>
+
+      <div class="filter-label" style="margin-top:1.5rem">Género</div>
+      <div class="genre-filter-list" id="genreFilters"></div>
+    </div>
+
+    <button class="add-btn" onclick="openModal()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Añadir anime
+    </button>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main" id="main">
+
+    <!-- HEADER -->
+    <header class="topbar">
+      <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Menú">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="search-wrap">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="search-input" id="searchInput" placeholder="Buscar título, descripción..." oninput="debounceRender()">
+      </div>
+      <div class="topbar-right">
+        <select class="sort-select" id="sortSelect" onchange="render()">
+          <option value="name_asc">A → Z</option>
+          <option value="name_desc">Z → A</option>
+          <option value="score_desc">Mayor puntuación</option>
+          <option value="score_asc">Menor puntuación</option>
+        </select>
+        <div class="view-toggle">
+          <button class="view-btn active" id="gridBtn" onclick="setView('grid')" title="Cuadrícula">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </button>
+          <button class="view-btn" id="listBtn" onclick="setView('list')" title="Lista">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- LIBRARY VIEW -->
+    <div class="view" id="view-library">
+      <div class="page-title-row">
+        <h1 class="page-title" id="viewTitle">Biblioteca</h1>
+        <span class="count-badge" id="countBadge">0</span>
+      </div>
+      <div id="animeGrid" class="anime-grid"></div>
+      <div id="emptyState" class="empty-state" style="display:none">
+        <div class="empty-icon">空</div>
+        <p>No hay resultados para esta búsqueda.</p>
+      </div>
+      <div id="loadingState" class="loading-state">
+        <div class="loader"></div>
+        <p>Cargando tu biblioteca…</p>
+      </div>
+    </div>
+
+    <!-- STATS VIEW -->
+    <div class="view" id="view-stats" style="display:none">
+      <div class="page-title-row">
+        <h1 class="page-title">Estadísticas</h1>
+      </div>
+      <div class="stats-grid" id="statsGrid"></div>
+      <div class="charts-row" id="chartsRow"></div>
+    </div>
+
+  </main>
+
+  <!-- MODAL -->
+  <div class="modal-overlay" id="modalOverlay" onclick="closeModalOutside(event)">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalHeading">
+      <div class="modal-header">
+        <h2 id="modalHeading" class="modal-title">Añadir anime</h2>
+        <button class="modal-close" onclick="closeModal()" aria-label="Cerrar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Título *</label>
+            <input type="text" class="field-input" id="fName" placeholder="Nombre del anime">
+          </div>
+          <div class="field">
+            <label class="field-label">Puntuación (0–10)</label>
+            <input type="number" class="field-input" id="fScore" min="0" max="10" step="0.1" placeholder="8.5">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Género *</label>
+            <input type="text" class="field-input" id="fGenre" list="genreDatalist" placeholder="Acción, Shonen…">
+            <datalist id="genreDatalist"></datalist>
+          </div>
+          <div class="field">
+            <label class="field-label">Estado</label>
+            <select class="field-input" id="fStatus">
+              <option value="No visto">No visto</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="Viendo">Viendo</option>
+              <option value="Visto">Visto</option>
+              <option value="Abandonado">Abandonado</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Link (URL)</label>
+          <input type="url" class="field-input" id="fLink" placeholder="https://myanimelist.net/...">
+        </div>
+        <div class="field">
+          <label class="field-label">Descripción</label>
+          <textarea class="field-input field-textarea" id="fDesc" placeholder="Sinopsis o notas personales…"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn-primary" id="saveBtn" onclick="saveAnime()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Guardar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
